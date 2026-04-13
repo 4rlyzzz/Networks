@@ -1,4 +1,21 @@
 /* Server code in C */
+/*
+PROTOCOL C->S
+LOGIN:     L + 4B(size_nick) + nick
+LOGOUT:    O
+BROADCAST: B + 7B(size_msg) + msg
+UNICAST:   U + 5B(size_msg) + msg + 7B(size_dest) + dest
+LIST:      T
+FILE:      F
+
+PROTOCOL S->C
+LOGIN OK:  k
+ERROR:     e + 5B(size_msg) + msg
+BROADCAST: b + 3B(size_msg) + msg + 7B(size_orig) + orig
+UNICAST:   u + 7B(size_orig) + orig + 5B(size_msg) + msg
+LIST:      t + 5B(size_data) + data
+FILE:      f
+*/
 
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -38,6 +55,7 @@ void sendError(int fd, std::string msg){
     write(fd, send.c_str(), send.length());
 }
 
+// receives commands from the client (C->S) and sends responses (S->C)
 void readThread(int ConnectFD){
   while(true){
     // READ
@@ -45,7 +63,9 @@ void readThread(int ConnectFD){
     int n = read(ConnectFD, buffer, 1);
     buffer[n] = '\0';
 
-    if(buffer[0] == 'L'){ // login
+    // LOGIN - PROTOCOL (C->S): L + 4B(size_nick) + nick 
+    //                  (S->C): k / e + 5B(size_msg) + msg
+    if(buffer[0] == 'L'){ 
       n = read(ConnectFD, buffer, 4);
       buffer[n] = '\0';
       
@@ -55,9 +75,11 @@ void readThread(int ConnectFD){
 
       std::string nick2 = buffer;
 
+      /////////////////////////////
+
       // Check
       if(buff.find(nick2) != buff.end()){
-        sendError(ConnectFD, "Nick ya en uso");
+        sendError(ConnectFD, "Nick in use");
       } 
       else {
         buff[nick2] = ConnectFD;
@@ -65,7 +87,9 @@ void readThread(int ConnectFD){
       }
     }
 
-    else if(buffer[0] == 'O'){ // logout
+    // LOGOUT - PROTOCOL (C->S): O 
+    //                   (S->C): k
+    else if(buffer[0] == 'O'){
       for(auto& i: buff){
         if(i.second == ConnectFD){
           buff.erase(i.first);
@@ -75,7 +99,9 @@ void readThread(int ConnectFD){
       }
     }
 
-    else if(buffer[0] == 'B'){ // broadcast
+    // BROADCAST - PROTOCOL (C->S): B + 7B(size_msg) + msg 
+    //                      (S->C): b + 3B(size_msg) + msg + 7B(size_orig) + orig
+    else if(buffer[0] == 'B'){
       n = read(ConnectFD, buffer, 7);
       buffer[n] = '\0';
 
@@ -84,6 +110,8 @@ void readThread(int ConnectFD){
       buffer[n] = '\0';
 
       std::string msg = buffer;
+
+      /////////////////////////////
 
       std::string orig;
       for(auto i: buff){
@@ -100,7 +128,9 @@ void readThread(int ConnectFD){
       
     }
 
-    else if(buffer[0] == 'U'){ // unicast
+    // UNICAST - PROTOCOL (C->S): U + 5B(size_msg) + msg + 7B(size_dest) + dest 
+    //                    (S->C) u + 7B(size_orig) + orig + 5B(size_msg) + msg
+    else if(buffer[0] == 'U'){ 
 
       n = read(ConnectFD, buffer, 5);
       buffer[n] = '\0';
@@ -120,6 +150,8 @@ void readThread(int ConnectFD){
 
       std::string nick= buffer;
 
+      /////////////////////////////
+
       std::string orig;
       for(auto i: buff){
         if(i.second == ConnectFD){
@@ -129,22 +161,21 @@ void readThread(int ConnectFD){
       }
 
       std::string send = "u" + sizeString(orig.length(), 7) + orig + sizeString(msg.length(), 5) + msg;
-      
-      if(buff.find(nick) != buff.end())
-        write(buff[nick], send.c_str(), send.length());
 
       // Check
       if(buff.find(nick) != buff.end())
         write(buff[nick], send.c_str(), send.length());
       else
-        sendError(ConnectFD, "Usuario no encontrado");
+        sendError(ConnectFD, "User not found");
     }
-    
-    else if(buffer[0] == 'T'){ // lista usuarios
 
+    // LIST - PROTOCOL(C->S): T 
+    //                (S->C): t + 5B(size_data) + data
+    else if(buffer[0] == 'T'){ 
     }
-    else if(buffer[0] == 'F'){ // file
 
+    // FILE - PROTOCOL (C->S): F
+    else if(buffer[0] == 'F'){
     }
 
 
@@ -172,8 +203,6 @@ int main(void)
 
   printf("-------------------------SERVER-------------------------\n");
   
-  int n;
-  
 
   char buff_name[256];
 
@@ -182,15 +211,6 @@ int main(void)
   for(;;)
   {
     int ConnectFD = accept(SocketFD, NULL, NULL);
-
-    /*
-    // nick
-    n = read(ConnectFD, buff_name, 255);
-    buff_name[n] = '\0';
-    std::string nickname = buff_name;
-    
-    buff[nickname] = ConnectFD;
-    */
 
     std::thread t1 (readThread, ConnectFD);
     t1.detach();

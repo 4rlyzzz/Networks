@@ -1,4 +1,21 @@
 /* Client code in C */
+/*
+PROTOCOL C->S
+LOGIN:     L + 4B(size_nick) + nick
+LOGOUT:    O
+BROADCAST: B + 7B(size_msg) + msg
+UNICAST:   U + 5B(size_msg) + msg + 7B(size_dest) + dest
+LIST:      T
+FILE:      F
+
+PROTOCOL S->C
+LOGIN OK:  k
+ERROR:     e + 5B(size_msg) + msg
+BROADCAST: b + 3B(size_msg) + msg + 7B(size_orig) + orig
+UNICAST:   u + 7B(size_orig) + orig + 5B(size_msg) + msg
+LIST:      t + 5B(size_data) + data
+FILE:      f
+*/
 
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -34,41 +51,45 @@ std::string sizeString(int s, int digitos) {
 }
 
 enum Menu {
-  LOGIN = 1, LOGOUT, BROADCAST, UNICAST, LIST, SALIR
+  LOGIN = 1, LOGOUT, BROADCAST, UNICAST, LIST, SEND_FILE, SALIR
 };
 
 void showMenu() {
     std::cout << "\n=== Menu ===\n";
     if (!logg) {
         std::cout << "1. Login\n";
-        std::cout << "6. Salir\n";
+        std::cout << "7. Salir\n";
     } else {
         std::cout << "2. Logout\n";
-        std::cout << "3. Broadcast msg\n";
-        std::cout << "4. Unicast msg\n";
-        std::cout << "5. Ver Usuarios\n";
-        std::cout << "6. Salir\n";
+        std::cout << "3. Broadcast\n";
+        std::cout << "4. Unicast\n";
+        std::cout << "5. View users\n";
+        std::cout << "6. Send File\n";
+        std::cout << "7. Salir\n";
     }
-    std::cout << "Opcion: ";
+    std::cout << ">> Option: ";
 }
 
+// sends commands to the server (C->S)
 void ejecutarComando(Menu opt, int SocketFD) {
     switch (opt) {
 
+        // LOGIN - PROTOCOL (C->S): L + 4B(size_nick) + nick
         case LOGIN: {
             std::string msg = "L" + sizeString(nickname.length(), 4) + nickname;
-            write(SocketFD, msg.c_str(), msg.length());
-            
+            write(SocketFD, msg.c_str(), msg.length());       
             sleep(1);         
             break;
         }
-        
+
+        // LOGOUT - PROTOCOL (C->S): O
         case LOGOUT:{
             write(SocketFD, "O", 1);
             logg = false;
             break;
         }
 
+        // BROADCAST - PROTOCOL (C->S): B + 7B(size_msg) + msg
         case BROADCAST: {
 
             std::string msg; 
@@ -83,14 +104,14 @@ void ejecutarComando(Menu opt, int SocketFD) {
             break;
         }
 
+        // UNICAST - PROTOCOL (C->S): U + 5B(size_msg) + msg + 7B(size_dest) + dest
         case UNICAST:{
 
             std::string dest;
             std::string msg; 
     
-            std::cout << ">> Destinatary: ";
+            std::cout << ">> Addressee: ";
             std::getline(std::cin, dest);
-            std::cout << "\n";
             
             std::cout << ">> Message: ";
             std::getline(std::cin, msg);
@@ -102,23 +123,28 @@ void ejecutarComando(Menu opt, int SocketFD) {
             break;
         }
 
+        // LIST - PROTOCOL (C->S): T
         case LIST: {
             break;
         }
 
-        case SALIR:
-            std::cout << ">> Saliendo del programa..." << std::endl;
+        // FILE - PROTOCOL (C->S): F
+        case SEND_FILE: {
             break;
+        }
 
-        default:
-            std::cout << ">> Opcion invalida." << std::endl;
+        case SALIR: {
             break;
+        }
+
+        default: {
+            std::cout << ">> Invalid option" << std::endl;
+            break;
+        }
     }
 }
 
-
-
-
+// receives and processes messages from the server (S->C)
 void readThread(int ConnectFD){
   // READ
   while(true){
@@ -126,7 +152,8 @@ void readThread(int ConnectFD){
     int n = read(ConnectFD, buffer, 1);
     buffer[n] = '\0';
 
-    if(buffer[0] == 'l'){ // login - protocolo: L + 4B size + Nick
+    // LOGIN - PROTOCOL: L + 4B(size_nick) + nick
+    if(buffer[0] == 'l'){ 
         n = read(ConnectFD, buffer, 4);
         buffer[n] = '\0';
         
@@ -134,15 +161,20 @@ void readThread(int ConnectFD){
         n = read(ConnectFD, buffer, 3);
         buffer[n] = '\0';
 
-        std::string nick2 = buffer;
+        std::string nick = buffer;
     }
 
+    // LOGIN - PROTOCOL (S->C): k
     else if(buffer[0] == 'k'){
-        logg = true;
 
-        std::cout << ">> Login exitoso" << std::endl;
+        logg = true;
+        if(logg)
+            std::cout << ">> Successful login" << std::endl;
+        else
+            std::cout << ">> Successful logout" << std::endl;
     }
 
+    // ERROR - PROTOCOL (S->C): e + 5B(size_msg) + msg
     else if(buffer[0] == 'e'){
         n = read(ConnectFD, buffer, 5);
         buffer[n] = '\0';
@@ -156,12 +188,13 @@ void readThread(int ConnectFD){
         std::cout << ">> Error: " << buffer << std::endl;
 
         if(!logg){ 
-            std::cout << "Ingresa otro nickname: ";
+            std::cout << ">> Enter another nickname: ";
             std::getline(std::cin, nickname);
         }
     }
 
-    else if(buffer[0] == 'b'){ // broadcast
+    // BROADCAST - PROTOCOL (S->C): b + 3B(size_msg) + msg + 7B(size_nickOrig) + nickOrig
+    else if(buffer[0] == 'b'){ 
 
         n = read(ConnectFD, buffer, 3);
         buffer[n] = '\0';
@@ -170,7 +203,7 @@ void readThread(int ConnectFD){
         n = read(ConnectFD, buffer, l);
         buffer[n] = '\0';
 
-        std::string msg2 = buffer;
+        std::string msg = buffer;
 
         n = read(ConnectFD, buffer, 7);
         buffer[n] = '\0';
@@ -179,14 +212,14 @@ void readThread(int ConnectFD){
         n = read(ConnectFD, buffer, ll);
         buffer[n] = '\0';
 
-        std::string nickDest = buffer;
+        std::string nickOrig = buffer;
         
-        std::cout << "[" << nickDest << "]: " << msg2 << std::endl;
+        std::cout << "[" << nickOrig << "]: " << msg << std::endl;
 
     }
-    
-    else if(buffer[0] == 'u'){ // unicast - protocolo U + 5B sizeMsg + msg + 7B sizeDest + dest
 
+    // UNICAST - PROTOCOL (S->C): u + 7B(size_nickOrig) + nickOrig + 5B(size_msg) + msg
+    else if(buffer[0] == 'u'){ 
         n = read(ConnectFD, buffer, 7);
         buffer[n] = '\0';
 
@@ -194,7 +227,7 @@ void readThread(int ConnectFD){
         n = read(ConnectFD, buffer, l);
         buffer[n] = '\0';
 
-        std::string nickDest = buffer;
+        std::string nickOrig = buffer;
 
         n = read(ConnectFD, buffer, 5);
         buffer[n] = '\0';
@@ -203,20 +236,19 @@ void readThread(int ConnectFD){
         n = read(ConnectFD, buffer, ll);
         buffer[n] = '\0';
 
-        std::string msg2 = buffer;
+        std::string msg = buffer;
         
-        std::cout << "[" << nickDest << "]: " << msg2 << std::endl;
+        std::cout << "[" << nickOrig << "]: " << msg << std::endl;
 
     }
 
-    else if(buffer[0] == 't'){ // lista usuarios
+    // LIST - PROTOCOL (S->C): t + 5B(size_data) + data
+    else if(buffer[0] == 't'){ 
     }
 
-    else if(buffer[0] == 'f'){ // file
+    // FILE - PROTOCOL (S->C): f
+    else if(buffer[0] == 'f'){ 
     }
-
-
-
   }
 }
 
@@ -240,9 +272,8 @@ int main(void)
 
     printf("-------------------------CLIENT-------------------------\n");
 
-    std::cout << "nickname: ";
+    std::cout << "Nickname: ";
     std::getline(std::cin, nickname);
-    std::cout << "\n";
 
     std::thread t1 (readThread, SocketFD);
     t1.detach();
@@ -253,22 +284,18 @@ int main(void)
     showMenu();
 
     do{
-
         scanf("%d", &val);
         getchar();
         opt = static_cast<Menu>(val);
 
         if(logg || opt == LOGIN || opt == SALIR)
             ejecutarComando(opt, SocketFD);
-        showMenu();
+
+        if(opt != SALIR)
+            showMenu();
 
     } while(opt != SALIR);
 
-
-
-
-
-    //t1.join();
     shutdown(SocketFD, SHUT_RDWR);
     close(SocketFD);
     return 0;	
