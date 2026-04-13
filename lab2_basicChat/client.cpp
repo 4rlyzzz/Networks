@@ -1,4 +1,5 @@
 /* Client code in C */
+// PROTOCOLO: 3B(size_nickname) + nickname + 3B(size_msg) + msg
 
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -11,7 +12,6 @@
 
 #include <iostream>
 #include <string>
-#include <thread>
 
 
 std::string sizeString(int s){ // 293
@@ -29,32 +29,6 @@ std::string sizeString(int s){ // 293
         num[2] = s + '0'; // 3
     }
     return num;
-}
-
-void readThread(int ConnectFD){
-  while(true){
-    // READ
-    char buffer[256];
-    int n = read(ConnectFD, buffer, 3);
-    buffer[n] = '\0';
-
-    int l = atoi(buffer);
-    n = read(ConnectFD, buffer, l);
-    buffer[n] = '\0';
-
-    std::string nick2 = buffer;
-
-    n = read(ConnectFD, buffer, 3);
-    buffer[n] = '\0';
-
-    int ll = atoi(buffer);
-    n = read(ConnectFD, buffer, ll);
-    buffer[n] = '\0';
-
-    std::string msg2 = buffer;
-    
-    std::cout << "[" << nick2 << "]: " << msg2 << std::endl; 
-  }
 }
 
 int main(void)
@@ -82,16 +56,14 @@ std::string msg;
 
 std::cout << "nickname: ";
 std::getline(std::cin, nickname);
-std::cout << "\n";
 
 std::string sizeNick = sizeString(nickname.length());
 
-std::thread t1 (readThread, SocketFD);
 
 for(;;){
 
   // WRITE
-  //std::cout << "message: ";
+  std::cout << "message: ";
   std::getline(std::cin, msg);
 
   std::string sizeMsg = sizeString(msg.length());
@@ -100,8 +72,31 @@ for(;;){
 
   write(SocketFD, nose.c_str(), nose.length());
   
+
+  // READ
+  char buffer[256];
+  int n = read(SocketFD, buffer, 3);
+  buffer[n] = '\0';
+
+  int l = atoi(buffer);
+  n = read(SocketFD, buffer, l);
+  buffer[n] = '\0';
+
+  std::string nick2 = buffer;
+  
+  n = read(SocketFD, buffer, 3);
+  buffer[n] = '\0';
+
+  int ll = atoi(buffer);
+  n = read(SocketFD, buffer, ll);
+  buffer[n] = '\0';
+
+  std::string msg2 = buffer;
+  
+  std::cout << "[" << nick2 << "]: " << msg2 << std::endl; 
+
 }
-t1.join();
+
 shutdown(SocketFD, SHUT_RDWR);
 close(SocketFD);
 return 0;	

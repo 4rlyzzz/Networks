@@ -1,4 +1,5 @@
 /* Server code in C */
+// PROTOCOLO: 3B(size_nickname) + nickname + 3B(size_msg) + msg
 
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -10,6 +11,7 @@
 #include <unistd.h>
 
 #include <iostream>
+#include <thread>
 
 
 std::string sizeString(int s){ // 293
@@ -29,6 +31,31 @@ std::string sizeString(int s){ // 293
     return num;
 }
 
+void readThread(int ConnectFD){
+  while(true){
+    // READ
+    char buffer[256];
+    int n = read(ConnectFD, buffer, 3);
+    buffer[n] = '\0';
+
+    int l = atoi(buffer);
+    n = read(ConnectFD, buffer, l);
+    buffer[n] = '\0';
+
+    std::string nick2 = buffer;
+
+    n = read(ConnectFD, buffer, 3);
+    buffer[n] = '\0';
+
+    int ll = atoi(buffer);
+    n = read(ConnectFD, buffer, ll);
+    buffer[n] = '\0';
+
+    std::string msg2 = buffer;
+    
+    std::cout << "'" << nick2 << "': " << msg2 << std::endl; 
+  }
+}
 
 int main(void)
 {
@@ -52,41 +79,23 @@ int main(void)
   
   std::cout << "nickname: ";
   std::getline(std::cin, nickname);
+  std::cout << "\n";
   
   std::string sizeNick = sizeString(nickname.length());
+
+
 
   // connect -> client , socket -> server
   for(;;)
   {
     int ConnectFD = accept(SocketFD, NULL, NULL);
 
+    std::thread t1 (readThread, ConnectFD);
     for(;;)
     {
- 
-        // READ
-        char buffer[256];
-        int n = read(ConnectFD, buffer, 3);
-        buffer[n] = '\0';
 
-        int l = atoi(buffer);
-        n = read(ConnectFD, buffer, l);
-        buffer[n] = '\0';
-
-        std::string nick2 = buffer;
-        
-        n = read(ConnectFD, buffer, 3);
-        buffer[n] = '\0';
-
-        int ll = atoi(buffer);
-        n = read(ConnectFD, buffer, ll);
-        buffer[n] = '\0';
-
-        std::string msg2 = buffer;
-        
-        std::cout << "'" << nick2 << "': " << msg2 << std::endl;  
-        
         // WRITE
-        std::cout << "message: ";
+        //std::cout << "message: ";
         std::getline(std::cin, msg);
 
         std::string sizeMsg = sizeString(msg.length());
@@ -97,6 +106,7 @@ int main(void)
       
     }
 
+    t1.join();
     shutdown(ConnectFD, SHUT_RDWR);
 
     close(ConnectFD);
