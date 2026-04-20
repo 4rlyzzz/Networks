@@ -31,7 +31,10 @@ FILE:      f
 #include <thread>
 #include <map>
 
-std::map<std::string, int> buff;
+#include <fstream>
+#include <nlohmann/json.hpp>
+
+std::map<std::string, int> clientsRegister;
 std::string nickname;
 bool logg = false;
 
@@ -65,10 +68,19 @@ void showMenu() {
         std::cout << "4. Unicast\n";
         std::cout << "5. View users\n";
         std::cout << "6. Send File\n";
-        std::cout << "7. Salir\n";
     }
     std::cout << ">> Option: ";
 }
+
+void readSeguro(int fd, char* destino, int tam) {
+    int total = 0;
+    while (total < tam) {
+        int n = read(fd, destino + total, tam - total);
+        if (n <= 0) break;
+        total += n;
+    }
+}
+
 
 // sends commands to the server (C->S)
 void ejecutarComando(Menu opt, int SocketFD) {
@@ -76,6 +88,7 @@ void ejecutarComando(Menu opt, int SocketFD) {
 
         // LOGIN - PROTOCOL (C->S): L + 4B(size_nick) + nick
         case LOGIN: {
+            logg = true;
             std::string msg = "L" + sizeString(nickname.length(), 4) + nickname;
             write(SocketFD, msg.c_str(), msg.length());       
             sleep(1);         
@@ -106,10 +119,10 @@ void ejecutarComando(Menu opt, int SocketFD) {
 
         // UNICAST - PROTOCOL (C->S): U + 5B(size_msg) + msg + 7B(size_dest) + dest
         case UNICAST:{
-
+            
             std::string dest;
             std::string msg; 
-    
+            
             std::cout << ">> Addressee: ";
             std::getline(std::cin, dest);
             
@@ -125,11 +138,44 @@ void ejecutarComando(Menu opt, int SocketFD) {
 
         // LIST - PROTOCOL (C->S): T
         case LIST: {
+            write(SocketFD, "T", 1);
             break;
         }
 
-        // FILE - PROTOCOL (C->S): F
+        // FILE - PROTOCOL (C->S): F | 5B(size_fileData) | fileData | 5B(size_fileName) | fileName | 5B(size_destNick) | destNick 
         case SEND_FILE: {
+            std::string fileName, destNick;
+            std::cout<<"Introduzca el nombre archivo: ";
+            std::getline(std::cin, fileName);
+            
+            std::cout<<"Introduzca  el destinatario: ";
+            std::getline(std::cin, destNick);
+            
+            std::ifstream file(fileName, std::ios::binary);
+
+            if (!file.is_open())
+                break; 
+
+            file.seekg(0, std::ios::end);
+            std::streamsize size = file.tellg();
+            file.seekg(0, std::ios::beg);
+
+
+            std::string fileData;
+            fileData.resize(size);
+
+            file.read(&fileData[0], size);
+
+
+            if (fileData.size() > 100000)
+                fileData.resize(99999);
+
+            //std::cout << "SIZE: " << fileData.length() << std::endl;
+
+            std::string send = "F" + sizeString(fileData.length(), 5) + fileData + 
+                                     sizeString(fileName.length(), 5) + fileName + 
+                                     sizeString(destNick.length(), 5) + destNick;
+            write(SocketFD, send.c_str(), send.length());
             break;
         }
 
@@ -164,8 +210,8 @@ void readThread(int ConnectFD){
         std::string nick = buffer;
     }
 
-    // LOGIN - PROTOCOL (S->C): k
-    else if(buffer[0] == 'k'){
+    // LOGIN - PROTOCOL (S->C): K
+    else if(buffer[0] == 'K'){
 
         logg = true;
         if(logg)
@@ -193,26 +239,26 @@ void readThread(int ConnectFD){
         }
     }
 
-    // BROADCAST - PROTOCOL (S->C): b + 3B(size_msg) + msg + 7B(size_nickOrig) + nickOrig
+    // BROADCAST - PROTOCOL (S->C): b + 3B(size_nickOrig) + nickOrig + 7B(size_msg) + msg
     else if(buffer[0] == 'b'){ 
 
         n = read(ConnectFD, buffer, 3);
         buffer[n] = '\0';
-
+        
         int l = atoi(buffer);
         n = read(ConnectFD, buffer, l);
         buffer[n] = '\0';
-
-        std::string msg = buffer;
-
+        
+        std::string nickOrig = buffer;
+        
         n = read(ConnectFD, buffer, 7);
         buffer[n] = '\0';
-
+        
         int ll = atoi(buffer);
         n = read(ConnectFD, buffer, ll);
         buffer[n] = '\0';
-
-        std::string nickOrig = buffer;
+        
+        std::string msg = buffer;
         
         std::cout << "[" << nickOrig << "]: " << msg << std::endl;
 
@@ -243,11 +289,56 @@ void readThread(int ConnectFD){
     }
 
     // LIST - PROTOCOL (S->C): t + 5B(size_data) + data
-    else if(buffer[0] == 't'){ 
+    else if(buffer[0] == 't'){
+        n = read(ConnectFD, buffer, 5);
+        buffer[n] = '\0';
+
+        int l = atoi(buffer);
+        n = read(ConnectFD, buffer, l);
+        buffer[n] = '\0';
+
+        auto listJson = nlohmann::json::parse(buffer);
+
+        std::cout << "\n=== LISTA DE USUARIOS ===\n";
+        for(auto& nombre : listJson["usuarios"]) {
+            std::cout << "- " << nombre.get<std::string>() << std::endl;
+    }
     }
 
-    // FILE - PROTOCOL (S->C): f
+    // FILE - PROTOCOL (S->C): f | 5B(size_fileData) | fileData | 5B(size_fileName) | fileName | 5B(size_orig) | orig 
     else if(buffer[0] == 'f'){ 
+        readSeguro(ConnectFD, buffer, 5);
+        buffer[5] = '\0';
+
+        int l_file = atoi(buffer);
+        std::string fileData(l_file, '\0');
+        readSeguro(ConnectFD, &fileData[0], l_file);
+
+        readSeguro(ConnectFD, buffer, 5);
+        buffer[5] = '\0';
+
+        int l_name = atoi(buffer);
+        std::string fileName(l_name, '\0');
+        readSeguro(ConnectFD, &fileName[0], l_name);
+
+        readSeguro(ConnectFD, buffer, 5);
+        buffer[5] = '\0';
+
+        int l_orig = atoi(buffer);
+        std::string origName(l_orig, '\0');
+        readSeguro(ConnectFD, &origName[0], l_orig);
+
+        std::string pathGuardado = "descargado_" + fileName;
+        std::ofstream fileOut(pathGuardado, std::ios::binary | std::ios::out);
+        
+        if(fileOut.is_open()){
+            fileOut.write(fileData.data(), fileData.size());
+            fileOut.close();
+            std::cout << "\n>> [FILE] Archivo '" << fileName << "' recibido de [" << origName << "]" << std::endl;
+            std::cout << ">> Guardado como: " << pathGuardado << std::endl;
+        } else {
+            std::cout << "\n>> [ERROR] No se pudo crear el archivo local." << std::endl;
+        }
     }
   }
 }
@@ -265,10 +356,10 @@ int main(void)
     inet_pton(AF_INET, "192.168.1.12", &stSockAddr.sin_addr);
     
     if(connect(SocketFD, (const struct sockaddr*)&stSockAddr, sizeof(struct sockaddr_in)) < 0){
-    std::cout << "connect failed" << std::endl;
-    close(SocketFD);
-    return 1;
-}
+        std::cout << "connect failed" << std::endl;
+        close(SocketFD);
+        return 1;
+    }
 
     printf("-------------------------CLIENT-------------------------\n");
 
@@ -291,7 +382,7 @@ int main(void)
         if(logg || opt == LOGIN || opt == SALIR)
             ejecutarComando(opt, SocketFD);
 
-        if(opt != SALIR)
+        if(opt != SALIR || opt != LOGIN)
             showMenu();
 
     } while(opt != SALIR);
